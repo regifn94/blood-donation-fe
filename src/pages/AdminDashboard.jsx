@@ -13,7 +13,12 @@ import {
   Home, 
   UserPlus, 
   LogOut,
-  AlertCircle 
+  AlertCircle,
+  Edit,
+  Package,
+  X,
+  Check,
+  Clock
 } from 'lucide-react';
 import apiService from '../services/api';
 
@@ -34,6 +39,17 @@ const AdminDashboard = () => {
   
   // State untuk donor list
   const [donors, setDonors] = useState([]);
+  
+  // State untuk blood requests
+  const [bloodRequests, setBloodRequests] = useState([]);
+  
+  // Modal states
+  const [showUpdateModal, setShowUpdateModal] = useState(false);
+  const [showRequestsModal, setShowRequestsModal] = useState(false);
+  const [selectedStock, setSelectedStock] = useState(null);
+  const [updateQuantity, setUpdateQuantity] = useState('');
+  const [updatingStock, setUpdatingStock] = useState(false);
+  const [processingRequest, setProcessingRequest] = useState(false);
   
   // Get current user
   const currentUser = apiService.auth.getUser();
@@ -59,6 +75,10 @@ const AdminDashboard = () => {
       const pendonorList = await apiService.user.getAllPendonors();
       setDonors(pendonorList);
       
+      // Fetch blood requests
+      const requests = await apiService.bloodRequest.getAll();
+      setBloodRequests(requests.filter(req => req.status === 'Pending'));
+      
       setError('');
     } catch (err) {
       console.error('Error fetching dashboard data:', err);
@@ -73,33 +93,91 @@ const AdminDashboard = () => {
     navigate('/login');
   };
 
-  // Get blood stock status class
-  const getStockClass = (status) => {
-    switch (status) {
-      case 'Kritis':
-        return 'critical';
-      case 'Menipis':
-        return 'thin';
-      case 'Aman':
-        return 'safe';
-      default:
-        return 'safe';
+  // Handle stock update
+  const handleUpdateStock = async (e) => {
+    e.preventDefault();
+    if (!selectedStock || !updateQuantity) return;
+    
+    setUpdatingStock(true);
+    try {
+      await apiService.bloodStock.updateStock(
+        selectedStock.gol_darah,
+        parseInt(updateQuantity)
+      );
+      
+      // Refresh data
+      await fetchDashboardData();
+      
+      // Close modal and reset
+      setShowUpdateModal(false);
+      setSelectedStock(null);
+      setUpdateQuantity('');
+      
+      // Show success message
+      alert('Stok darah berhasil diperbarui!');
+    } catch (err) {
+      console.error('Error updating stock:', err);
+      alert('Gagal memperbarui stok darah');
+    } finally {
+      setUpdatingStock(false);
     }
   };
 
-  // Calculate donor status
-  const getDonorStatus = (lastDonation) => {
-    if (!lastDonation) return 'Siap Donor';
-    
-    const lastDate = new Date(lastDonation);
-    const threeMonthsAgo = new Date();
-    threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
-    
-    if (lastDate <= threeMonthsAgo) {
-      return 'Siap Donor';
-    } else {
-      return 'Masa Tunggu';
+  // Handle blood request status update
+  const handleRequestStatusUpdate = async (requestId, status, catatan = null) => {
+    setProcessingRequest(true);
+    try {
+      // Find the request details
+      const request = bloodRequests.find(req => req.id === requestId);
+      if (!request) {
+        throw new Error('Permintaan tidak ditemukan');
+      }
+
+      // If approving, check stock availability first
+      if (status === 'Disetujui') {
+        const currentStock = bloodStocks.find(stock => stock.gol_darah === request.gol_darah);
+        
+        if (!currentStock) {
+          alert(`Stok darah ${request.gol_darah} tidak tersedia!`);
+          return;
+        }
+
+        if (currentStock.jumlah_kantong < request.jumlah_kantong) {
+          alert(`Stok tidak mencukupi! Tersedia: ${currentStock.jumlah_kantong} kantong, Diminta: ${request.jumlah_kantong} kantong`);
+          return;
+        }
+
+        // Update the request status
+        await apiService.bloodRequest.updateStatus(requestId, status, catatan);
+        
+        // Reduce the blood stock
+        const newQuantity = currentStock.jumlah_kantong - request.jumlah_kantong;
+        await apiService.bloodStock.updateStock(request.gol_darah, newQuantity);
+        
+        // Show success message with stock info
+        alert(`Permintaan disetujui! Stok ${request.gol_darah} berkurang ${request.jumlah_kantong} kantong. Sisa stok: ${newQuantity} kantong`);
+      } else {
+        // For rejection, just update status
+        await apiService.bloodRequest.updateStatus(requestId, status, catatan);
+        alert('Permintaan darah ditolak');
+      }
+      
+      // Refresh all data to show updated stocks and requests
+      await fetchDashboardData();
+      
+    } catch (err) {
+      console.error('Error updating request:', err);
+      alert(err.message || 'Gagal memproses permintaan darah');
+    } finally {
+      setProcessingRequest(false);
     }
+  };
+
+  // Open update modal
+  const openUpdateModal = (stock) => {
+    setSelectedStock(stock);
+    setUpdateQuantity(stock.jumlah_kantong.toString());
+    setShowUpdateModal(true);
   };
 
   // Format date
@@ -222,25 +300,57 @@ const AdminDashboard = () => {
           </div>
         </div>
 
+        {/* Action Buttons */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
+          <button
+            onClick={() => setShowUpdateModal(true)}
+            className="flex items-center justify-center gap-3 px-6 py-4 bg-red-600 hover:bg-red-700 text-white rounded-xl transition shadow-lg hover:shadow-xl"
+          >
+            <Edit className="w-5 h-5" />
+            <span className="font-semibold">Update Stok Darah</span>
+          </button>
+          
+          <button
+            onClick={() => setShowRequestsModal(true)}
+            className="flex items-center justify-center gap-3 px-6 py-4 bg-blue-600 hover:bg-blue-700 text-white rounded-xl transition shadow-lg hover:shadow-xl"
+          >
+            <Package className="w-5 h-5" />
+            <span className="font-semibold">Permintaan Darah ({bloodRequests.length})</span>
+          </button>
+        </div>
+
         {/* Blood Stock Management */}
         <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-100 mb-8">
-          <div className="flex items-center gap-2 mb-6">
-            <Home className="w-5 h-5 text-gray-700" />
-            <h2 className="text-lg font-bold text-gray-900">Manajemen Stok Darah</h2>
+          <div className="flex items-center justify-between mb-6">
+            <div className="flex items-center gap-2">
+              <Home className="w-5 h-5 text-gray-700" />
+              <h2 className="text-lg font-bold text-gray-900">Manajemen Stok Darah</h2>
+            </div>
           </div>
           
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             {bloodStocks.map((stock) => (
               <div
                 key={stock.gol_darah}
-                className={`p-4 rounded-lg border-2 ${
+                className={`relative p-4 rounded-lg border-2 cursor-pointer hover:shadow-md transition ${
                   stock.status === 'Kritis'
                     ? 'bg-red-50 border-red-300'
                     : stock.status === 'Menipis'
                     ? 'bg-yellow-50 border-yellow-300'
                     : 'bg-green-50 border-green-300'
                 }`}
+                onClick={() => openUpdateModal(stock)}
               >
+                <button
+                  className="absolute top-2 right-2 p-1 hover:bg-white rounded-full transition"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    openUpdateModal(stock);
+                  }}
+                >
+                  <Edit className="w-3 h-3 text-gray-600" />
+                </button>
+                
                 <div className="flex items-start justify-between mb-2">
                   <span className="text-lg font-bold text-gray-900">
                     {stock.gol_darah}
@@ -341,6 +451,237 @@ const AdminDashboard = () => {
           )}
         </div>
       </main>
+
+      {/* Update Stock Modal */}
+      {showUpdateModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl max-w-md w-full p-6 shadow-xl">
+            <div className="flex items-center justify-between mb-6">
+              <h3 className="text-lg font-bold text-gray-900">Update Stok Darah</h3>
+              <button
+                onClick={() => {
+                  setShowUpdateModal(false);
+                  setSelectedStock(null);
+                  setUpdateQuantity('');
+                }}
+                className="p-1 hover:bg-gray-100 rounded-full transition"
+              >
+                <X className="w-5 h-5 text-gray-500" />
+              </button>
+            </div>
+
+            {selectedStock ? (
+              <form onSubmit={handleUpdateStock}>
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Golongan Darah
+                  </label>
+                  <div className="px-4 py-3 bg-gray-100 rounded-lg font-semibold text-gray-900">
+                    {selectedStock.gol_darah}
+                  </div>
+                </div>
+
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Jumlah Kantong
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={updateQuantity}
+                    onChange={(e) => setUpdateQuantity(e.target.value)}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
+                    placeholder="Masukkan jumlah kantong"
+                    required
+                  />
+                  <p className="text-xs text-gray-500 mt-1">
+                    Stok saat ini: {selectedStock.jumlah_kantong} kantong
+                  </p>
+                </div>
+
+                <div className="mb-6">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Keterangan
+                  </label>
+                  <textarea
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
+                    rows="3"
+                    placeholder="Opsional: Tambahkan catatan perubahan"
+                  />
+                </div>
+
+                <div className="flex gap-3">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowUpdateModal(false);
+                      setSelectedStock(null);
+                      setUpdateQuantity('');
+                    }}
+                    className="flex-1 px-4 py-3 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition"
+                    disabled={updatingStock}
+                  >
+                    Batal
+                  </button>
+                  <button
+                    type="submit"
+                    className="flex-1 px-4 py-3 bg-red-600 text-white rounded-lg hover:bg-red-700 transition disabled:opacity-50"
+                    disabled={updatingStock}
+                  >
+                    {updatingStock ? 'Memperbarui...' : 'Update Now'}
+                  </button>
+                </div>
+              </form>
+            ) : (
+              <div className="space-y-3">
+                <p className="text-sm text-gray-600 mb-4">
+                  Pilih golongan darah yang ingin diperbarui:
+                </p>
+                <div className="grid grid-cols-2 gap-3">
+                  {bloodStocks.map((stock) => (
+                    <button
+                      key={stock.gol_darah}
+                      onClick={() => openUpdateModal(stock)}
+                      className="px-4 py-3 border border-gray-300 rounded-lg hover:bg-gray-50 transition text-center"
+                    >
+                      <span className="font-semibold">{stock.gol_darah}</span>
+                      <span className="block text-xs text-gray-500 mt-1">
+                        {stock.jumlah_kantong} kantong
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Blood Requests Modal */}
+      {showRequestsModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl max-w-4xl w-full p-6 shadow-xl max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-6">
+              <div className="flex items-center gap-2">
+                <Package className="w-5 h-5 text-blue-600" />
+                <h3 className="text-lg font-bold text-gray-900">Permintaan Darah</h3>
+                <span className="px-2 py-1 bg-blue-100 text-blue-800 rounded-full text-xs font-medium">
+                  {bloodRequests.length} Pending
+                </span>
+              </div>
+              <button
+                onClick={() => setShowRequestsModal(false)}
+                className="p-1 hover:bg-gray-100 rounded-full transition"
+              >
+                <X className="w-5 h-5 text-gray-500" />
+              </button>
+            </div>
+
+            {bloodRequests.length === 0 ? (
+              <div className="text-center py-12">
+                <Package className="w-16 h-16 text-gray-300 mx-auto mb-4" />
+                <p className="text-gray-500">Tidak ada permintaan darah pending</p>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {bloodRequests.map((request) => {
+                  // Get current stock for this blood type
+                  const currentStock = bloodStocks.find(stock => stock.gol_darah === request.gol_darah);
+                  const stockAvailable = currentStock ? currentStock.jumlah_kantong : 0;
+                  const isStockSufficient = stockAvailable >= request.jumlah_kantong;
+                  
+                  return (
+                    <div
+                      key={request.id}
+                      className="border border-gray-200 rounded-lg p-4 hover:shadow-md transition"
+                    >
+                      <div className="flex items-start justify-between">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-3 mb-2">
+                            <span className="text-lg font-semibold text-gray-900">
+                              {request.nama_pasien}
+                            </span>
+                            <span className="px-2 py-1 bg-red-100 text-red-800 rounded-full text-sm font-medium">
+                              {request.gol_darah}
+                            </span>
+                            <span className="px-2 py-1 bg-gray-100 text-gray-700 rounded text-sm">
+                              {request.jumlah_kantong} kantong
+                            </span>
+                          </div>
+                          <p className="text-sm text-gray-600 mb-2">
+                            <strong>Keperluan:</strong> {request.keperluan}
+                          </p>
+                          <div className="flex items-center gap-4 mb-2">
+                            <span className={`text-xs font-medium px-2 py-1 rounded ${
+                              isStockSufficient 
+                                ? 'bg-green-100 text-green-800' 
+                                : 'bg-red-100 text-red-800'
+                            }`}>
+                              Stok Tersedia: {stockAvailable} kantong
+                              {!isStockSufficient && ' (Tidak Mencukupi)'}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-4 text-xs text-gray-500">
+                            <span className="flex items-center gap-1">
+                              <Clock className="w-3 h-3" />
+                              {formatDate(request.tanggal_request)}
+                            </span>
+                            <span className="px-2 py-1 bg-yellow-100 text-yellow-800 rounded-full">
+                              Pending
+                            </span>
+                          </div>
+                        </div>
+                        <div className="flex gap-2 ml-4">
+                          <button
+                            onClick={() => {
+                              if (isStockSufficient) {
+                                if (confirm(`Setujui permintaan ${request.jumlah_kantong} kantong darah ${request.gol_darah} untuk ${request.nama_pasien}?\n\nStok akan berkurang dari ${stockAvailable} menjadi ${stockAvailable - request.jumlah_kantong} kantong.`)) {
+                                  handleRequestStatusUpdate(request.id, 'Disetujui');
+                                }
+                              }
+                            }}
+                            disabled={processingRequest || !isStockSufficient}
+                            className={`px-3 py-2 rounded-lg transition flex items-center gap-1 ${
+                              isStockSufficient 
+                                ? 'bg-green-600 text-white hover:bg-green-700' 
+                                : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                            } disabled:opacity-50`}
+                            title={!isStockSufficient ? 'Stok tidak mencukupi' : 'Setujui permintaan'}
+                          >
+                            <Check className="w-4 h-4" />
+                            <span className="hidden sm:inline">Setujui</span>
+                          </button>
+                          <button
+                            onClick={() => {
+                              if (confirm(`Tolak permintaan darah untuk ${request.nama_pasien}?`)) {
+                                handleRequestStatusUpdate(request.id, 'Ditolak', 'Stok tidak mencukupi');
+                              }
+                            }}
+                            disabled={processingRequest}
+                            className="px-3 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition disabled:opacity-50 flex items-center gap-1"
+                          >
+                            <X className="w-4 h-4" />
+                            <span className="hidden sm:inline">Tolak</span>
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            <div className="mt-6 pt-6 border-t border-gray-200">
+              <button
+                onClick={() => setShowRequestsModal(false)}
+                className="w-full px-4 py-3 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition"
+              >
+                Tutup
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
