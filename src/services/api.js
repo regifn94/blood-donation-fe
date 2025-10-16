@@ -1,5 +1,5 @@
 /**
- * API Service - Unified
+ * API Service - Unified with Notifications
  * All API calls in one service file
  * Blood Donor Management System
  */
@@ -393,6 +393,106 @@ const apiService = {
       return response.data;
     },
   },
+
+  // ==================== Notifications (Admin Only) ====================
+  
+  notifications: {
+    /**
+     * Test email system
+     * @param {string} email - Email address to send test to
+     * @returns {Promise} Response with success status
+     */
+    testEmail: async (email) => {
+      const response = await axiosInstance.post(`/admin/notifications/test-email?email=${encodeURIComponent(email)}`);
+      return response.data;
+    },
+
+    /**
+     * Manually trigger blood stock check and alerts
+     * @returns {Promise} Response with success message
+     */
+    triggerStockCheck: async () => {
+      const response = await axiosInstance.post('/admin/notifications/trigger-stock-check');
+      return response.data;
+    },
+
+    /**
+     * Manually trigger donation reminders
+     * @returns {Promise} Response with success message
+     */
+    triggerReminders: async () => {
+      const response = await axiosInstance.post('/admin/notifications/trigger-reminders');
+      return response.data;
+    },
+
+    /**
+     * Manually trigger weekly summary
+     * @returns {Promise} Response with success message
+     */
+    triggerWeeklySummary: async () => {
+      const response = await axiosInstance.post('/admin/notifications/send-weekly-summary');
+      return response.data;
+    },
+
+    /**
+     * Get notification system status
+     * @returns {Promise} System status with scheduler info
+     */
+    getStatus: async () => {
+      const response = await axiosInstance.get('/admin/notifications/status');
+      return response.data;
+    },
+
+    /**
+     * Send custom notification
+     * @param {Object} notificationData - Notification data
+     * @param {string} notificationData.email - Recipient email
+     * @param {string} notificationData.subject - Email subject
+     * @param {string} notificationData.message - Email message
+     * @param {boolean} notificationData.use_ai - Whether to enhance with AI
+     * @returns {Promise} Response with success status
+     */
+    sendCustom: async (notificationData) => {
+      const response = await axiosInstance.post('/admin/notifications/send-custom', null, {
+        params: {
+          email: notificationData.email,
+          subject: notificationData.subject,
+          message: notificationData.message,
+          use_ai: notificationData.use_ai || false
+        }
+      });
+      return response.data;
+    },
+
+    /**
+     * Send bulk notifications to multiple recipients
+     * @param {Array} recipients - Array of email addresses
+     * @param {string} subject - Email subject
+     * @param {string} message - Email message
+     * @param {boolean} useAI - Whether to enhance with AI
+     * @returns {Promise} Response with success count
+     */
+    sendBulk: async (recipients, subject, message, useAI = false) => {
+      const promises = recipients.map(email => 
+        apiService.notifications.sendCustom({
+          email,
+          subject,
+          message,
+          use_ai: useAI
+        })
+      );
+      
+      const results = await Promise.allSettled(promises);
+      const successful = results.filter(r => r.status === 'fulfilled').length;
+      const failed = results.filter(r => r.status === 'rejected').length;
+      
+      return {
+        total: recipients.length,
+        successful,
+        failed
+      };
+    },
+  },
 };
 
 // ==================== Export ====================
@@ -406,4 +506,5 @@ export const {
   bloodStock,
   bloodRequest,
   user,
+  notifications,
 } = apiService;

@@ -1,6 +1,6 @@
 /**
  * AdminDashboard.jsx
- * Admin Dashboard with API Integration
+ * Admin Dashboard with API Integration & AI Notifications
  * src/pages/admin/AdminDashboard.jsx
  */
 
@@ -18,9 +18,11 @@ import {
   Package,
   X,
   Check,
-  Clock
+  Clock,
+  Bell
 } from 'lucide-react';
 import apiService from '../services/api';
+import NotificationPanel from '../components/NotificationPanel';
 
 const AdminDashboard = () => {
   const navigate = useNavigate();
@@ -46,6 +48,7 @@ const AdminDashboard = () => {
   // Modal states
   const [showUpdateModal, setShowUpdateModal] = useState(false);
   const [showRequestsModal, setShowRequestsModal] = useState(false);
+  const [showNotificationPanel, setShowNotificationPanel] = useState(false);
   const [selectedStock, setSelectedStock] = useState(null);
   const [updateQuantity, setUpdateQuantity] = useState('');
   const [updatingStock, setUpdatingStock] = useState(false);
@@ -301,7 +304,7 @@ const AdminDashboard = () => {
         </div>
 
         {/* Action Buttons */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
           <button
             onClick={() => setShowUpdateModal(true)}
             className="flex items-center justify-center gap-3 px-6 py-4 bg-red-600 hover:bg-red-700 text-white rounded-xl transition shadow-lg hover:shadow-xl"
@@ -316,6 +319,15 @@ const AdminDashboard = () => {
           >
             <Package className="w-5 h-5" />
             <span className="font-semibold">Permintaan Darah ({bloodRequests.length})</span>
+          </button>
+
+          <button
+            onClick={() => setShowNotificationPanel(true)}
+            className="flex items-center justify-center gap-3 px-6 py-4 bg-purple-600 hover:bg-purple-700 text-white rounded-xl transition shadow-lg hover:shadow-xl relative"
+          >
+            <Bell className="w-5 h-5" />
+            <span className="font-semibold">Notification Center</span>
+            <span className="absolute -top-1 -right-1 w-3 h-3 bg-yellow-400 rounded-full animate-pulse"></span>
           </button>
         </div>
 
@@ -681,6 +693,11 @@ const AdminDashboard = () => {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Notification Panel */}
+      {showNotificationPanel && (
+        <NotificationPanel onClose={() => setShowNotificationPanel(false)} />
       )}
     </div>
   );
